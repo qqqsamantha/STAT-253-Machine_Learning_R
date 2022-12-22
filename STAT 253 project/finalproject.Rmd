@@ -1,0 +1,543 @@
+---
+title: "253_finalproject"
+author: "Xinyi Wang"
+date: "5/9/2021"
+output: html_document
+---
+
+```{r}
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(ISLR)
+library(splines)
+library(gam)
+library(stringr)
+library(leaps)
+library(rpart.plot)
+```
+
+```{r}
+airbnb_kaggle <- read.csv("/Users/apple/Downloads/NYC_airbnb_kaggle.csv")
+neighbourhood <- read.csv("/Users/apple/Downloads/NYC_nbhd_kaggle.csv")
+```
+
+```{r}
+set.seed(253)
+airbnb <- airbnb_kaggle %>%
+  left_join(neighbourhood, c("neighbourhood_cleansed" = "neighbourhood")) %>%
+  filter (price < 1000) %>%
+  sample_n(5000) %>% 
+  select(-id, -host_response_time) %>%
+  mutate(host_response_rate = as.numeric(str_remove_all(host_response_rate, "%"))) %>%
+  mutate(host_is_superhost = as.logical(toupper(host_is_superhost))) %>%
+  mutate(host_has_profile_pic = as.logical(toupper(host_has_profile_pic))) %>%
+  mutate(is_location_exact = as.logical(toupper(is_location_exact))) %>%
+  mutate(instant_bookable = as.logical(toupper(instant_bookable))) %>%
+  mutate(is_business_travel_ready = as.logical(toupper(is_business_travel_ready))) %>%
+  mutate(require_guest_profile_picture = as.logical(toupper(require_guest_profile_picture))) %>%
+  dplyr::na_if("N/A")
+```
+
+```{r}
+airbnb_select <- airbnb %>%
+  select(price,property_type,room_type,accommodates,beds,guests_included,minimum_nights,availability_30,bathrooms,bedrooms,review_scores_rating,is_business_travel_ready,cancellation_policy,require_guest_profile_picture,reviews_per_month,neighbourhood_group)
+```
+
+## Data context
+
+### Clearly describe what the cases in the final clean dataset represent.
+This dataset describes the listing house resources and metrics in New York City for 2019. Each case in the final clean dataset represents one airbnb with correspoinding price, nerighborhood, accommodates, etc.
+
+### Broadly describe the variables used in your analyses.
+It contains quantitative variable, for example, price, maximum and minimum nights, host response
+rate, the number of guests the property can accommodate, the number of bedrooms and bathrooms of the property, the amenities available, number of reviews,review score rating, reviews per month and also categorical variables, for example, the position of the property, the type of the room ( a house or an apartment), if the host has profile picture, th type of beds in the room, if the property is instant bookable, if the property is business travel ready, the cancellation policy, and the neighbourhood group of the property.
+
+### Who collected the data? When, why, and how?
+Dgomonov posted the data 2 years ago. The data file includes all needed information to find out more about hosts, geographical availability, necessary metrics to make predictions and draw conclusions. He posted it mainly to answer the following questions: What can we learn about different hosts and areas? What can we learn from predictions(ex: locations, prices, reviews, etc)?Which hosts are the busiest and why? Is there any noticeable difference of traffic among different areas and what could be the reason for it?
+
+## Research questions
+
+### Research question(s) for the regression task make clear the outcome variable and its units
+How do different aspects, such as the locations, room types and availability over a month, affect the price of the Airbnb? The units is dollars.
+
+### Research question(s) for the classification task make clear the outcome variable and its possible categories
+How to determine which neighborhood the Airbnb is in according to its price, property type, room type, and reviews per month etc.? Possible categories: Brooklyn, Queens, Manhattan
+
+## HW3 investigations - Methods
+
+### Describe the models used in your HW3 project work investigations
+We are using ordinary least squares (OLS) regression, backward selection, and LASSO to build initial models
+
+#### backstep model
+
+```{r}
+set.seed(253)
+back_step_mod1 <- train(
+  price~property_type+
+                   room_type+
+                   accommodates+
+                   beds+
+                   guests_included+
+                   minimum_nights+
+                   availability_30+
+                   bathrooms+
+                   bedrooms+
+                   review_scores_rating+
+                   is_business_travel_ready+
+                   require_guest_profile_picture+
+                   reviews_per_month+
+                   neighbourhood_group,
+    data = airbnb_select,
+    method = "leapBackward",
+    tuneGrid = data.frame(nvmax = 1:13),
+    trControl = trainControl(method = "cv", number = 10),
+    metric = "MAE",
+    na.action = na.omit
+)
+```
+
+#### LASSO model
+
+```{r}
+set.seed(253)
+lasso_mod1 <-train(data=airbnb_select,
+                price~property_type+
+                  room_type+
+                  accommodates+
+                  beds+
+                  guests_included+
+                  minimum_nights+
+                  availability_30+
+                  bathrooms+bedrooms+
+                  review_scores_rating+
+                  is_business_travel_ready+
+                  cancellation_policy+
+                  require_guest_profile_picture+
+                  reviews_per_month+
+                  neighbourhood_group,
+                method="glmnet",
+                trControl=trainControl(method = "cv", number = 10, selectionFunction = "oneSE"),
+                tuneGrid = data.frame(alpha = 1, lambda = seq(0, 20, length.out = 100)),
+                metric = "MAE",
+                na.action = na.omit)
+```
+
+#### backstep model(non-linearity)
+```{r}
+back_step_mod2 <- train(
+    price ~ property_type+
+                  room_type+
+                  ns(accommodates,3)+
+                  ns(beds,3)+
+                  ns(guests_included,3)+
+                  ns(minimum_nights,3)+
+                  ns(availability_30,3)+
+                  ns(bathrooms,3)+ns(bedrooms,3)+
+                  ns(review_scores_rating,3)+
+                  is_business_travel_ready+
+                  cancellation_policy+
+                  require_guest_profile_picture+
+                  ns(reviews_per_month,3)+
+                  neighbourhood_group,
+    data = airbnb_select,
+    method = "leapBackward",
+    tuneGrid = data.frame(nvmax = 1:33),
+    trControl = trainControl(method = "cv", number =10),
+    metric = "MAE",
+    na.action = na.omit
+)
+```
+
+#### LASSO model(non-linearity)
+
+```{r}
+set.seed(253)
+lasso_mod2 <- train(data=airbnb_select,
+                price~property_type+
+                  room_type+
+                  ns(accommodates,3)+
+                  ns(beds,3)+
+                  ns(guests_included,3)+
+                  ns(minimum_nights,3)+
+                  ns(availability_30,3)+
+                  ns(bathrooms,3)+ns(bedrooms,3)+
+                  ns(review_scores_rating,3)+
+                  is_business_travel_ready+
+                  cancellation_policy+
+                  require_guest_profile_picture+
+                  ns(reviews_per_month,3)+
+                  neighbourhood_group,
+                method="glmnet",
+                trControl=trainControl(method = "cv", number = 10, selectionFunction = "oneSE"),
+                tuneGrid = data.frame(alpha = 1, lambda = seq(0, 20, length.out = 100)),
+                metric = "MAE",
+                na.action = na.omit)
+```
+
+### Describe what you did to evaluate models:Indicate how you estimated quantitative evaluation metrics.
+
+We are using Cross-validation to get the error metric (MAE) for each model.
+
+### Describe what you did to evaluate models:Indicate what plots you used to evaluate models.
+
+```{r}
+plot(back_step_mod1)
+```
+
+```{r}
+plot(back_step_mod2)
+```
+
+```{r}
+plot(lasso_mod1$finalModel, xvar = "lambda", label = TRUE, col = rainbow(20))
+```
+
+```{r}
+plot(lasso_mod1)
+```
+
+```{r}
+plot(lasso_mod2$finalModel, xvar = "lambda", label = TRUE, col = rainbow(20))
+```
+
+```{r}
+plot(lasso_mod2)
+```
+#### Describe the goals / purpose of the methods used in the overall context of your research investigations.
+
+We are using backstep and LASSO to give us the most importance variables is determining the price for airbnb so that we can build the best model with the least error.
+
+## HW3 investigations - Results - Variable Importance 
+```{r}
+coef(back_step_mod1$finalModel, id = back_step_mod1$bestTune$nvmax)
+```
+
+lasso_mod1$bestTune
+
+```{r}
+coef(back_step_mod2$finalModel, id = back_step_mod2$bestTune$nvmax)
+```
+
+```{r}
+coef(lasso_mod1$finalModel, lasso_mod1$bestTune$lambda)
+```
+
+```{r}
+lasso_mod1$bestTune
+```
+
+```{r}
+coef(lasso_mod2$finalModel,lasso_mod2$bestTune$lambda)
+```
+
+```{r}
+lasso_mod2$bestTune
+```
+
+## HW3 investigations - Summary
+
+### If it was appropriate to fit a GAM for your investigations (having some quantitative predictors), show plots of estimated functions for each predictor, and provide some general interpretations.
+
+```{r}
+airbnb_select <-airbnb_select%>%
+  mutate(room_type = str_replace(room_type,"/","_"))%>%
+  mutate(property_type=str_replace(property_type," ","_"))%>%
+  mutate(property_type=str_replace(property_type,"&","and"))%>%
+  mutate(room_type=str_replace(room_type," ","_"))
+```
+
+```{r}
+gam_mod <- train(
+    price ~ property_type+room_type+accommodates+beds+availability_30+bathrooms+bedrooms+review_scores_rating+is_business_travel_ready+cancellation_policy+require_guest_profile_picture+reviews_per_month+neighbourhood_group,
+    data = airbnb_select,
+    method = "gamLoess",
+    tuneGrid = data.frame(degree = 1, span = seq(0.5, 0.9, by = 0.1)),
+    trControl = trainControl(method = "cv", number = 10, selectionFunction = "best"),
+    metric = "MAE",
+    na.action = na.omit
+)
+```
+
+```{r}
+plot(gam_mod)
+```
+
+```{r}
+gam_mod$bestTune
+```
+
+```{r}
+gam_mod$results
+```
+
+```{r}
+par(mfrow = c(3,3)) 
+plot(gam_mod$finalModel, se = TRUE)
+```
+
+### Compare the different models tried in HW3 in light of evaluation metrics, plots, variable importance, and data context.
+
+```{r}
+back_step_mod1$results%>%arrange(MAE)
+```
+
+```{r}
+back_step_mod2$results%>%arrange(MAE)
+```
+
+```{r}
+lasso_mod1$results%>%arrange(MAE)
+```
+
+```{r}
+lasso_mod2$results%>%arrange(MAE)
+```
+```{r}
+airbnb_select2 <- airbnb %>%
+  select(price,property_type,room_type,accommodates,beds,guests_included,minimum_nights,availability_30,bathrooms,bedrooms,review_scores_rating,is_business_travel_ready,cancellation_policy,require_guest_profile_picture,reviews_per_month,neighbourhood_group)
+```
+
+```{r}
+airbnb_select_noNA<-tidyr::drop_na(airbnb_select2)
+back_step_mod_out <- airbnb_select_noNA %>%
+    mutate(
+        fitted = predict(back_step_mod2, newdata = airbnb_select_noNA),
+        resid = price - fitted
+    )
+```
+
+```{r}
+ggplot(back_step_mod_out, aes(x = beds, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+```{r}
+ggplot(back_step_mod_out, aes(x = bathrooms, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+```{r}
+ggplot(back_step_mod_out, aes(x = review_scores_rating, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+```{r}
+ggplot(back_step_mod_out, aes(x = reviews_per_month, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+```{r}
+ggplot(back_step_mod_out, aes(x = accommodates, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+```{r}
+lasso_model_out <- airbnb_select_noNA %>%
+    mutate(
+        fitted = predict(lasso_mod2, newdata = airbnb_select_noNA),
+        resid = price - fitted)
+```
+
+```{r}
+ggplot(lasso_model_out, aes(x = beds, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+```{r}
+ggplot(lasso_model_out, aes(x = bathrooms, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+```{r}
+ggplot(lasso_model_out, aes(x = review_scores_rating, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+```{r}
+ggplot(lasso_model_out, aes(x = reviews_per_month, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+```{r}
+ggplot(lasso_model_out, aes(x = accommodates, y = resid)) +
+    geom_point() +
+    geom_smooth() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_classic() +
+    labs(x = "Fitted values", y = "Residuals")
+```
+
+### Decide an overall most preferable model.
+
+```{r}
+coef(back_step_mod1$finalModel, id = 5)
+```
+
+```{r}
+coef(lasso_mod1$finalModel, 14)
+```
+
+## Classification analysis - Methods
+```{r}
+abnb<-airbnb_select%>%
+  filter(neighbourhood_group%in% c("Brooklyn","Manhattan","Queens"))
+```
+
+### Random forest model
+
+```{r}
+set.seed(253)
+rf_mod <- train(
+      neighbourhood_group ~ 
+      property_type+
+      price+
+      room_type+
+      accommodates+
+      beds+
+      guests_included+
+      minimum_nights+
+      availability_30+
+      bathrooms+
+      bedrooms+
+      review_scores_rating+
+      is_business_travel_ready+
+      require_guest_profile_picture+
+      reviews_per_month,
+    data = abnb,
+    method = "rf",
+    tuneGrid = data.frame(mtry = c(1,3,7,15)),
+    trControl = trainControl(method = "oob", selectionFunction = "best"),
+    metric = "Accuracy",
+    ntree = 1000, 
+    na.action = na.omit
+)
+```
+
+### Decision trees model
+
+```{r}
+tree_mod <- train(
+    neighbourhood_group ~ 
+      property_type+
+      price+
+      room_type+
+      accommodates+
+      beds+
+      guests_included+
+      minimum_nights+
+      availability_30+
+      bathrooms+
+      bedrooms+
+      review_scores_rating+
+      is_business_travel_ready+
+      require_guest_profile_picture+
+      reviews_per_month,
+    data = abnb,
+    method = "rpart",
+    tuneGrid = data.frame(cp = seq(0, 0.0042, length.out = 50)),
+    trControl = trainControl(method = "cv", number = 10, selectionFunction = "oneSE"),
+    metric = "Accuracy",
+    na.action = na.omit
+)
+
+```
+
+## Classification analysis - Results - Variable Importance
+
+```{r}
+var_imp_rf <- randomForest::importance(rf_mod$finalModel)
+
+var_imp_rf <- data.frame(
+        predictor = rownames(var_imp_rf),
+        MeanDecreaseGini = var_imp_rf[,"MeanDecreaseGini"]
+    ) %>%
+    arrange(desc(MeanDecreaseGini))
+
+# Top 20
+head(var_imp_rf, 20)
+```
+
+```{r}
+plot(rf_mod)
+```
+
+```{r}
+rf_mod$finalModel
+```
+
+```{r}
+rf_mod$results
+```
+
+
+```{r}
+plot(tree_mod)
+```
+
+```{r}
+ggplot(abnb, aes(x = neighbourhood_group, y = price)) +
+    geom_violin()
+ggplot(abnb, aes(x = neighbourhood_group, y = reviews_per_month)) +
+    geom_violin()
+ggplot(abnb, aes(x = neighbourhood_group, y = accommodates)) +
+    geom_violin()
+ggplot(abnb, aes(x = neighbourhood_group, y = availability_30)) +
+    geom_violin()
+ggplot(abnb, aes(x = neighbourhood_group, y = review_scores_rating)) +
+    geom_violin()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
